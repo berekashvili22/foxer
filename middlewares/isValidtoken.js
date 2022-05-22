@@ -1,13 +1,17 @@
 import jwt from 'jsonwebtoken';
 
 const isValidToken = (req, res, next) => {
-    const authHeader = req.headers.token;
+    const authHeader = req.headers['authorization'];
     if (authHeader) {
+        // Remove bearer part
+        const bearerToken = authHeader.split(' ');
+        const token = bearerToken[1];
+
         jwt.verify(token, process.env.JWT_KEY, (err, user) => {
             if (err) {
-                res.status(401).json('Token is not valid !');
+                return res.status(401).json('Token is not valid !');
             }
-            req.user = user;
+            req.body.user = user;
             next();
         });
     } else {
@@ -15,4 +19,4 @@ const isValidToken = (req, res, next) => {
     }
 };
 
-export const isValidToken = isValidToken;
+export default isValidToken;

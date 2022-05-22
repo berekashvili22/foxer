@@ -1,5 +1,5 @@
 import express from 'express';
-import { User } from '../models/User.js';
+import { User } from '../src/models/User.js';
 
 import jwt from 'jsonwebtoken';
 import CryptoJS from 'crypto-js';
@@ -15,7 +15,8 @@ router.post('/register', async (req, res) => {
         // Encrypt password
         password = CryptoJS.AES.encrypt(req.body.password, process.env.ENCRYPTER_KEY).toString();
     } catch (e) {
-        res.status(500).json(e);
+        console.log('Password encryption was unsuccessful');
+        return res.status(500).json(e);
     }
 
     const newUser = new User({
@@ -27,9 +28,9 @@ router.post('/register', async (req, res) => {
 
     try {
         const savedUser = await newUser.save();
-        res.status(201).json(savedUser);
+        return res.status(201).json(savedUser);
     } catch (e) {
-        res.status(500).json(e);
+        return res.status(500).json(e);
     }
 });
 
@@ -63,6 +64,7 @@ router.post('/login', async (req, res) => {
             res.status(401).json('Invalid Credentials');
         }
     } catch (e) {
+        console.log('🚀 ~ file: auth.js ~ line 67 ~ router.post ~ e', e);
         res.status(500).json(e);
     }
 });
