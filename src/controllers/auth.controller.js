@@ -2,46 +2,35 @@ import { findUser, loginUser, loginUserWithGoogle, registerUser } from '../servi
 import { messages } from '../utils/messages.js';
 
 /**
- * Register user
- * @param {Object} req
- * @param {Object} res
- */
-export async function registerController(req, res) {
-    try {
-        const { user, errors, msg } = await registerUser(req.body);
-
-        if (user) {
-            return res.status(200).json({ user, msg });
-        } else if (Object.keys(errors || {}).length > 0) {
-            return res.status(400).json({ msg, errors });
-        } else {
-            return res.status(500).json({ msg: msg || messages.unexpected });
-        }
-    } catch (e) {
-        console.log('🚀 ~ file: auth.controller.js ~ line 22 ~ registerController ~ e', e);
-        return res.status(500).json({ msg: msg || messages.unexpected });
-    }
-}
-
-/**
  * Login user
  * @param {Object} req
  * @param {Object} res
  */
 export async function loginController(req, res) {
     try {
-        const { user, success, msg } = await loginUser(req.body);
+        const { user, msg, code } = await loginUser(req.body);
 
-        if (success === true) {
-            return res.status(200).json({ user, msg });
-        } else if (success === false) {
-            return res.status(401).json({ user, msg });
-        }
+        return res.status(code).json({ user, msg });
     } catch (e) {
-        console.log('🚀 ~ file: auth.controller.js ~ line 37 ~ loginController ~ e', e);
+        console.log('🚀 ~ file: auth.controller.js ~ line 15 ~ loginController ~ e', e);
+        return res.status(500).json({ user: null, msg: messages.unexpected });
     }
+}
 
-    return res.status(500).json({ msg: 'Unexpected error occurred' });
+/**
+ * Register user
+ * @param {Object} req
+ * @param {Object} res
+ */
+export async function registerController(req, res) {
+    try {
+        const { user, msg, errors, code } = await registerUser(req.body);
+
+        return res.status(code).json({ user, msg, errors });
+    } catch (e) {
+        console.log('🚀 ~ file: auth.controller.js ~ line 31 ~ registerController ~ e', e);
+        return res.status(500).json({ msg: msg || messages.unexpected });
+    }
 }
 
 /**
@@ -53,15 +42,13 @@ export async function googleAuth(req, res) {
     try {
         const { token, clientId } = req.body;
         if (token && clientId) {
-            const { user, msg } = await loginUserWithGoogle(token, clientId);
-            if (user) {
-                return res.status(200).json({ user, msg });
-            } else {
-                return res.status(400).json({ user: null, msg });
-            }
+            const { user, msg, code } = await loginUserWithGoogle(token, clientId);
+
+            return res.status(code).json({ user, msg });
         }
     } catch (e) {
-        console.log('🚀 ~ file: auth.controller.js ~ line 48 ~ googleAuth ~ e', e);
+        console.log('🚀 ~ file: auth.controller.js ~ line 50 ~ googleAuth ~ e', e);
+        return res.status(500).json({ msg: messages.unexpected });
     }
 
     return res.status(500).json({ msg: messages.unexpected });

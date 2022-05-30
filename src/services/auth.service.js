@@ -4,8 +4,8 @@ import jwt from 'jsonwebtoken';
 
 import { encryptPassword, comparePasswords } from '../utils/crypto.js';
 import { OAuth2Client } from 'google-auth-library';
-import { messages } from '../utils/messages.js';
 
+import { messages } from '../utils/messages.js';
 import { isEmail } from '../utils/helpers.js';
 
 /**
@@ -15,75 +15,92 @@ import { isEmail } from '../utils/helpers.js';
 export async function registerUser(formValues) {
     // Validate form values
     const { isValid, errors } = await validateRegisterForm(formValues);
-    console.log('🚀 ~ file: auth.service.js ~ line 18 ~ registerUser ~ isValid, errors', isValid, errors);
 
-    // If form data is not valid
+    // If validation fails
     if (!isValid) {
-        return { msg: messages.invalidFormValues, errors: errors };
+        console.log('register form was invalid');
+        return { user: null, msg: messages.invalidFormValues, errors: errors, code: 400 };
     }
 
-    let encryptedPw;
+    // Encrypt password
+    const encryptedPw = await encryptPassword(formValues.password);
 
-    try {
-        // Encrypt password
-        encryptedPw = await encryptPassword(formValues.password);
-        // Replace raw password with encrypted one
-        formValues.password = encryptedPw;
-    } catch (e) {
-        console.log('Password encryption was unsuccessful');
-        return { msg: messages.unexpected };
+    // If encryption fails
+    if (!encryptedPw) {
+        console.log('register encryption failed');
+        return { user: null, msg: messages.unexpected, errors: errors, code: 500 };
     }
 
     // Create new user
-    const user = await createUser(formValues);
+    let user = await createUser({ ...formValues, password: encryptedPw });
 
     // If user created successfully
     if (user) {
-        return { msg: messages.registerSuccess, user };
-    } else {
-        return { msg: messages.unexpected };
+        // Login user
+        const { user: userData, code } = await loginUser({ email: user.email, password: formValues.password });
+
+        // If login was successful return user credentials including jwt token
+        if (code === 200 && userData) {
+            return {
+                user: userData,
+                msg: messages.registerSuccess,
+                errors: errors,
+                code: 200
+            };
+        } else {
+            // ! temp
+            console.log('login failed after register');
+        }
     }
+
+    // If user creation or login failed
+    return { user: null, msg: messages.unexpected, errors: errors, code: 500 };
 }
 
 /**
  * Login user
  * @param {Object} formValues - Login form data
- * @return {<Promise> string | null} - JWT Token
  */
 export async function loginUser(formValues) {
-    const { email, password } = formValues;
+    // Find user with email
+    const user = await findUser(formValues.email);
 
-    try {
-        // Get user
-        const user = await findUser(email);
-        if (user) {
-            // Check if password is valid
-            const passwordIsValid = comparePasswords(password, user.password);
+    // If user exists
+    if (user) {
+        // Check if password is valid
+        const passwordIsValid = await comparePasswords(formValues.password, user.password);
 
-            if (passwordIsValid) {
-                // Gen jwt token
-                const accessToken = jwt.sign(
-                    {
-                        email: user.email,
-                        isAdmin: user.isAdmin
-                    },
-                    process.env.JWT_KEY,
-                    { expiresIn: '3d' }
-                );
-
-                const { password, ...others } = user._doc;
-
-                return { user: { ...others, accessToken }, msg: messages.loginSuccess, success: true };
-            } else {
-                return { msg: messages.invalidCredentials, success: false };
-            }
-        } else {
-            return { msg: messages.invalidCredentials, success: false };
+        // If password is NOT valid
+        if (!passwordIsValid) {
+            return { user: null, msg: messages.invalidCredentials, code: 401 };
         }
-    } catch (e) {
-        console.log('🚀 ~ file: auth.service.js ~ line 61 ~ loginUser ~ e', e);
-        return { msg: messages.unexpected, success: undefined };
+
+        // If password is valid create jwt token
+        const jwtToken = jwt.sign(
+            {
+                email: user.email,
+                isAdmin: user.isAdmin
+            },
+            process.env.JWT_KEY,
+            { expiresIn: '3d' }
+        );
+
+        // If jwt token was NOT created
+        if (!jwtToken) {
+            return { user: null, msg: messages.unexpected, code: 500 };
+        }
+
+        // If jwt token was created successfully
+
+        // Get user data expect password
+        const { password, ...others } = user._doc;
+
+        // Return user with token
+        return { user: { accessToken: jwtToken, ...others }, msg: messages.loginSuccess, code: 200 };
     }
+
+    // If user does not exists
+    return { user: null, msg: messages.invalidCredentials, code: 401 };
 }
 
 export async function loginUserWithGoogle(token, clientId) {
@@ -94,6 +111,7 @@ export async function loginUserWithGoogle(token, clientId) {
     });
 
     let payload;
+
     try {
         // Verify if token is valid
         const ticket = await googleClient.verifyIdToken({
@@ -104,41 +122,63 @@ export async function loginUserWithGoogle(token, clientId) {
         // Get user data from ticked payload
         payload = ticket.getPayload();
     } catch (e) {
-        console.log('🚀 ~ file: auth.service.js ~ line 105 ~ loginUserWithGoogle ~ e', e);
-        // todo specify why i returned null with status code or something
-        return null;
+        console.log('🚀 ~ file: auth.service.js ~ line 114 ~ loginUserWithGoogle ~ e', e);
+        return { user: null, msg: messages.unexpected, code: 500 };
     }
 
     // Check if user with requested email already exists
     let user = await findUser(payload?.email);
 
-    // If user with requested email does not exists create new one
+    let msg;
+
+    // If user with requested email does NOT exists
     if (!user) {
-        const fullNameArr = payload.name.split(' ');
+        // Get user first name from payload data
+        const firstName = payload.name.split(' ')?.[0];
 
-        let firstName = fullNameArr?.[0];
-        let lastName = fullNameArr?.[1];
-        let pw = await encryptPassword(clientId);
+        // Get user last name from payload data
+        const lastName = payload.name.split(' ')?.[1];
 
+        // Encrypt user password (using clientId as password since user can not enter password when using social authentication)
+        const encryptedPassword = await encryptPassword(clientId);
+
+        // Create new user
         user = await createUser({
             email: payload.email,
             firstName: firstName,
             lastName: lastName,
-            password: pw,
+            password: encryptedPassword,
             authType: 'google',
             agreedOnTerms: true
         });
+
+        // Login user
+        const { user: userData, code } = await loginUser(user);
+
+        // If login was successful
+        if (code === 200 && userData) {
+            return { user, msg: messages.registerSuccess, code: 200 };
+        }
+
+        // If login was NOT successful
+        return { user: null, msg: messages.unexpected, code: 500 };
     }
 
-    // If we have user with requested email but authType is not google return null
-    if (user && user.authType !== 'google') {
-        // todo add message that user with same email already exists
-        return { msg: messages.emailAlreadyUsed };
+    // If we have user with requested email but authType is NOT google (that means that account is created via local auth and we can not let them login with social)
+    if (user.authType !== 'google') {
+        return { user: null, msg: messages.emailAlreadyUsed, code: 400 };
     }
 
-    user = await loginUser(user);
+    // If we have user with requested email and authType is google
+    if (user.authType === 'google') {
+        const { user: userData, code } = await loginUser(user);
 
-    return { user, msg: messages.registerSuccess };
+        if (userData && code === 200) {
+            return { user, msg: messages.registerSuccess, code: 200 };
+        }
+    }
+
+    return { user: null, msg: messages.unexpected, code: 500 };
 }
 
 /**

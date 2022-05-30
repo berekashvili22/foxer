@@ -41,8 +41,7 @@ export async function decryptPassword(encryptedPw) {
 export async function comparePasswords(pw, encryptedPw) {
     try {
         // Decrypt pw
-        const decryptedPw = decryptPassword(encryptedPw);
-
+        const decryptedPw = await decryptPassword(encryptedPw);
         return pw === decryptedPw;
     } catch (e) {
         console.log('🚀 ~ file: crypto.js ~ line 43 ~ comparePassword ~ e', e);
